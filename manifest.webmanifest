@@ -1,0 +1,15 @@
+{
+  "name": "NextGen Premier Roofing — Job Tracker",
+  "short_name": "NextGen Jobs",
+  "description": "Job tracking, pricing, invoicing, and scheduling for Next Gen Premier Roofing Contractor.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f9f9f7",
+  "theme_color": "#0f1216",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
