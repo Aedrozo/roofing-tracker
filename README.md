@@ -78,12 +78,61 @@ Open `index.html` in any modern browser (Chrome, Edge, Safari, Firefox). That's 
 - Save estimates for later, print them, or convert a won estimate into a job with
   one click.
 
+### Accounting (for your CPA, bookkeeper, and financial adviser)
+Full double-entry books, built automatically from the jobs, payments, expenses,
+and crew pay you already enter — nothing to post twice.
+
+- **Overview** — cash in bank, A/R, A/P, net income, wages payable, sales tax
+  payable, customer deposits, credit-card balance, and a "books health" checklist.
+- **Reports (17)** — Profit & Loss (accrual *and* cash basis), Balance Sheet,
+  Cash Flow, A/R aging, A/P aging, Job Profitability (job costing), Work in
+  Progress, Sales by Customer, Sales by Salesman, Expenses by Account, Expenses by
+  Vendor, Sales Tax Collected, Crew Payroll Summary, 1099 Vendor Report, Mileage
+  Log, Trial Balance, General Ledger. Any period, fiscal-year aware, print or CSV.
+- **📦 Accountant package** — one click downloads every report for the period as
+  CSV plus a QuickBooks/Xero-ready bank transaction file. This is what you hand to
+  your CPA at quarter/year end.
+- **Bills & Expenses** — overhead bills (rent, insurance, fuel, software…) with
+  vendor, account, due date, paid/unpaid, receipt attachments, and a mileage log at
+  the IRS rate.
+- **Vendors** — contact info, tax ID (masked in reports), 1099-eligible flag,
+  W-9 on file.
+- **Register** — every transaction in the books, filterable by account; manual
+  journal entries (opening balances, owner draws, adjustments) that must balance.
+- **Reconcile** — tick transactions against your bank statement, or import the
+  bank's CSV and matching lines clear automatically; unknown lines can be recorded
+  as an expense or deposit on the spot.
+- **Chart of Accounts** — standard contractor numbering (1000s assets, 2000s
+  liabilities, 3000s equity, 4000s income, 5000s job costs, 6000s overhead),
+  editable.
+- **Documents** — every invoice, receipt, contract, and photo attached anywhere in
+  the app, searchable in one place.
+- **Audit Log** — who changed what and when, for every money record; exportable.
+- **Sales tax** — a per-job rate (default in Settings) prints as Subtotal / Sales
+  tax / Total on invoices and posts to Sales Tax Payable.
+- **Closing date (period lock)** — once your CPA closes a period, nothing dated
+  on or before that date can be edited or deleted.
+
+### Security & access
+- **Passcode protection** (Settings → Security) encrypts everything stored on the
+  device — jobs, customers, financials, and every attached file — with AES-256-GCM
+  (key derived with PBKDF2, 210,000 iterations). The app locks itself after a set
+  idle time and on demand with the sidebar **Lock** button.
+- **Accountant passcode** — a second, read-only passcode to give your CPA or
+  bookkeeper: they can open the app, see everything, print and export any report,
+  but cannot add, change, or delete anything. Their exports and views are tagged
+  in the audit log.
+- There is no "forgot passcode" recovery by design — keep a recent backup file.
+
 ### Settings
 - **Branding** — the NextGen shield logo ships as the default (`assets/logo.png`) and
   the color scheme is built around its royal blue. The company name, tagline, and
   logo can all be changed; an uploaded logo is stored in the browser.
 - **Pricing rates** — every service rate is editable, and services can be added or
   removed. Changing a rate never touches prices already saved on jobs.
+- **Accounting** — fiscal year start, default report basis, closing date, sales
+  tax rate, IRS mileage rate, default bank account, EIN, your name for the audit log.
+- **Security & access** — passcode protection, accountant passcode, auto-lock.
 - **Data** — download a JSON backup (attached files included), restore from a
   backup, export jobs as CSV.
 
@@ -125,5 +174,16 @@ only the install/offline part needs real hosting.)
 ## Tech notes
 
 Plain HTML/CSS/JavaScript with zero dependencies — `index.html`, `css/styles.css`,
-`js/app.js`, `sw.js`, `manifest.webmanifest`. Works from a `file://` URL or any
-static host. Light and dark mode follow the system preference.
+`js/core.js` (state, helpers, crypto), `js/views.js` (screens), `js/accounting.js`
+(ledger, reports, security UI), `js/main.js` (event wiring), `sw.js`,
+`manifest.webmanifest`. Works from a `file://` URL or any static host. Light and
+dark mode follow the system preference.
+
+The ledger is derived on demand: `buildLedger()` turns jobs, payments, expenses,
+labor, bills, and journal entries into balanced double-entry transactions, and
+every report is computed from that. Nothing is posted twice and the books can't
+drift from the job data.
+
+`tests/audit.js` is a Playwright end-to-end suite (160+ checks, including ledger
+invariants, encryption lock/unlock, and read-only accountant mode):
+`CHROME_PATH=/path/to/chrome node tests/audit.js`.

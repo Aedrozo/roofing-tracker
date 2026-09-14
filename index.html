@@ -50,12 +50,18 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10a2 2 0 0 1 2 2v16l-7-3-7 3V5a2 2 0 0 1 2-2Zm2 5h6V6H9v2Zm0 4h6v-2H9v2Z"/></svg>
         Pricing Sheet
       </button>
+      <button class="nav-btn" data-action="nav" data-view="accounting">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm2 3v3h12V6H6Zm0 5v2h3v-2H6Zm5 0v2h3v-2h-3Zm5 0v2h2v-2h-2ZM6 15v2h3v-2H6Zm5 0v2h3v-2h-3Zm5 0v2h2v-2h-2Z"/></svg>
+        Accounting
+      </button>
       <button class="nav-btn" data-action="nav" data-view="settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm9 4c0 .6-.06 1.17-.16 1.73l2 1.55-2 3.44-2.35-.95c-.87.73-1.88 1.3-3 1.65L15 22H9l-.49-2.58a8.9 8.9 0 0 1-3-1.65l-2.35.95-2-3.44 2-1.55A9.3 9.3 0 0 1 3 12c0-.6.06-1.17.16-1.73l-2-1.55 2-3.44 2.35.95c.87-.73 1.88-1.3 3-1.65L9 2h6l.49 2.58c1.12.35 2.13.92 3 1.65l2.35-.95 2 3.44-2 1.55c.1.56.16 1.13.16 1.73Z"/></svg>
         Settings
       </button>
     </nav>
     <div class="sidebar-foot">
+      <span id="role-badge" class="role-badge" hidden>👓 Accountant · read-only</span>
+      <button id="lock-btn" class="btn small lock-btn" data-action="sec-lock" hidden>🔒 Lock</button>
       <p>All data is saved privately in this browser. Back it up any time from <button class="linklike" data-action="nav" data-view="settings">Settings</button>.</p>
     </div>
   </aside>
@@ -68,6 +74,7 @@
     <section id="view-employees" class="view" aria-label="Employees"></section>
     <section id="view-schedule" class="view" aria-label="Schedule"></section>
     <section id="view-pricing" class="view" aria-label="Pricing sheet"></section>
+    <section id="view-accounting" class="view" aria-label="Accounting"></section>
     <section id="view-settings" class="view" aria-label="Settings"></section>
   </main>
 </div>
@@ -75,12 +82,15 @@
 <dialog id="job-dialog" aria-label="Job details"></dialog>
 <dialog id="customer-dialog" aria-label="Customer details"></dialog>
 <dialog id="employee-dialog" aria-label="Employee details"></dialog>
+<dialog id="acct-dialog" aria-label="Accounting record"></dialog>
 <div id="invoice-overlay" hidden></div>
+<div id="lock-screen" hidden></div>
 <div id="chart-tooltip" class="chart-tooltip" role="status" hidden></div>
 <div id="toast" class="toast" role="status" hidden></div>
 
 <script src="js/core.js"></script>
 <script src="js/views.js"></script>
+<script src="js/accounting.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

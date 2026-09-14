@@ -20,6 +20,7 @@ function renderView() {
   else if (ui.view === 'schedule') renderSchedule();
   else if (ui.view === 'scopes') renderScopes();
   else if (ui.view === 'pricing') renderPricing();
+  else if (ui.view === 'accounting') renderAccounting();
   else if (ui.view === 'settings') renderSettings();
 }
 
@@ -501,6 +502,7 @@ function openJobDialog(jobId) {
     id: null, address: '', client: '', phone: '', email: '',
     serviceId: state.settings.services[0] ? state.settings.services[0].id : '',
     area: '', layers: 1, extras: [], price: '', status: 'lead',
+    taxRate: num(state.settings.salesTaxRate),
     startDate: '', completedDate: '', notes: '', expenses: [],
   };
   const unitP = esc(unitPlural());
@@ -551,6 +553,11 @@ function openJobDialog(jobId) {
         <div class="field">
           <label>&nbsp;</label>
           <button type="button" class="btn" data-action="jd-use-suggested">Use suggested price</button>
+        </div>
+        <div class="field">
+          <label for="jd-tax">Sales tax (%)</label>
+          <input id="jd-tax" type="number" min="0" step="0.001" value="${esc(num(j.taxRate))}">
+          <span class="hint">Added on the invoice. 0 = no sales tax.</span>
         </div>
         <div class="field">
           <label for="jd-status">Status</label>
@@ -670,7 +677,7 @@ function renderJobFiles() {
     files.sort((a, b) => (a.addedAt || '').localeCompare(b.addedAt || ''));
     box.innerHTML = files.map(f => `
       <div class="file-row">
-        ${f.type && f.type.startsWith('image/') ? `<img class="file-thumb" src="${URL.createObjectURL(f.blob)}" alt="">` : '<span class="file-icon">📄</span>'}
+        ${f.blob && f.type && f.type.startsWith('image/') ? `<img class="file-thumb" src="${URL.createObjectURL(f.blob)}" alt="">` : '<span class="file-icon">📄</span>'}
         <div class="file-meta">
           <b title="${esc(f.name)}">${esc(f.name)}</b>
           <span class="hint">${fmtSize(f.size)} · added ${dateLabel((f.addedAt || '').slice(0, 10))}</span>
@@ -752,12 +759,14 @@ function jobDialogRecalc() {
   const suggested = suggestedPrice(serviceId, area, layers);
   const extras = readDialogExtras().reduce((s, x) => s + x.amount, 0);
   const invoiceTotal = price + extras;
+  const taxEl = $('#jd-tax');
+  const tax = Math.round(invoiceTotal * (taxEl ? num(taxEl.value) : 0)) / 100;
   const expenseRows = readDialogExpenses();
   const expenses = expenseRows.reduce((s, e) => s + e.amount, 0);
   const unpaidExp = unpaidExpensesTotal(expenseRows);
   const labor = readDialogLabor().reduce((s, l) => s + l.amount, 0);
   const paid = readDialogPayments().reduce((s, p) => s + p.amount, 0);
-  const balance = invoiceTotal - paid;
+  const balance = invoiceTotal + tax - paid;
   const profit = invoiceTotal - expenses - labor;
   const margin = invoiceTotal > 0 ? (profit / invoiceTotal) * 100 : null;
   const svc = getService(serviceId);
@@ -775,8 +784,9 @@ function jobDialogRecalc() {
     </div>
     <div>
       <div class="calc-label">Invoice total</div>
-      <div class="calc-value">${money(invoiceTotal, true)}</div>
+      <div class="calc-value">${money(invoiceTotal + tax, true)}</div>
       ${extras > 0 ? `<div class="hint">incl. ${money(extras, true)} additional charges</div>` : ''}
+      ${tax > 0 ? `<div class="hint">incl. ${money(tax, true)} sales tax</div>` : ''}
     </div>
     <div>
       <div class="calc-label">Expenses</div>
@@ -811,8 +821,14 @@ function saveJobFromDialog() {
     $('#jd-address').focus();
     return;
   }
+  if (!canWrite()) { toast('Read-only accountant access — changes are not saved'); return; }
   const existing = dlgIsNew ? null : state.jobs.find(j => j.id === dlgJobId);
   const job = existing || { id: dlgJobId, createdAt: new Date().toISOString() };
+  const newDate = $('#jd-completed').value || $('#jd-start').value;
+  if (existing && (isClosed(recognitionDate(existing)) || isClosed(newDate))) {
+    toast('This job falls in a closed period — move the closing date in Settings to edit it');
+    return;
+  }
 
   job.address = address;
   job.client = $('#jd-client').value.trim();
@@ -823,6 +839,7 @@ function saveJobFromDialog() {
   job.layers = Math.max(1, Math.round(num($('#jd-layers').value) || 1));
   job.extras = readDialogExtras();
   job.price = num($('#jd-price').value);
+  job.taxRate = num($('#jd-tax').value);
   job.status = $('#jd-status').value;
   job.managerId = $('#jd-manager').value;
   job.leadSource = $('#jd-source').value;
@@ -837,6 +854,7 @@ function saveJobFromDialog() {
 
   if (!existing) state.jobs.push(job);
   dlgSaved = true;
+  logAudit(existing ? 'update' : 'create', 'job', job.id, `${job.address} · ${money(jobGrand(job), true)} · ${statusLabel(job.status)}`);
   saveState();
   dlg.close();
   renderView();
@@ -848,10 +866,13 @@ function deleteJobFromDialog() {
   const dlg = $('#job-dialog');
   const job = state.jobs.find(j => j.id === dlgJobId);
   if (!job) return;
+  if (!canWrite()) { toast('Read-only accountant access — changes are not saved'); return; }
+  if (isClosed(recognitionDate(job))) { toast('This job falls in a closed period and can’t be deleted'); return; }
   if (!confirm(`Delete the job at "${job.address}"? Its attached files are deleted too. This can't be undone.`)) return;
   state.jobs = state.jobs.filter(j => j.id !== dlgJobId);
   deleteJobFiles(dlgJobId).catch(() => {});
   dlgSaved = true; /* suppress the new-job cancel cleanup path */
+  logAudit('delete', 'job', job.id, `${job.address} · ${money(jobGrand(job), true)}`);
   saveState();
   dlg.close();
   renderView();
@@ -1025,6 +1046,7 @@ function saveCustomerFromDialog() {
   if (oldName && oldName !== name) {
     state.jobs.forEach(j => { if (j.customerId === c.id) j.client = name; });
   }
+  logAudit(existing ? 'update' : 'create', 'customer', c.id, name);
   saveState();
   dlg.close();
   renderView();
@@ -1167,6 +1189,7 @@ function saveEmployeeFromDialog() {
   e.rate = num($('#ed-rate').value);
   e.notes = $('#ed-notes').value.trim();
   if (!existing) state.employees.push(e);
+  logAudit(existing ? 'update' : 'create', 'employee', e.id, `${name} · ${e.payType} ${money(e.rate, true)}`);
   saveState();
   dlg.close();
   renderView();
@@ -1447,6 +1470,7 @@ function saveScopeForm() {
   }
   job.scope = sc;
   linkJobCustomer(job);
+  logAudit('update', 'scope', job.id, job.address);
   saveState();
   ui.scopeJobId = job.id;
   renderScopes();
@@ -1531,7 +1555,9 @@ function openInvoice(jobId) {
   const paid = paymentsTotal(job);
   const balance = balanceDue(job);
   const area = num(job.area);
-  const total = jobTotal(job);
+  const subtotal = jobTotal(job);
+  const tax = jobTax(job);
+  const total = jobGrand(job);
   const layers = Math.max(1, num(job.layers) || 1);
   const tear = tearoffCharge(area, layers);
   /* Split the contract price into base service + tear-off lines when possible. */
@@ -1607,6 +1633,9 @@ function openInvoice(jobId) {
       </table>
 
       <div class="inv-totals">
+        ${tax > 0 ? `
+        <div class="inv-row"><span>Subtotal</span><span>${money(subtotal, true)}</span></div>
+        <div class="inv-row"><span>Sales tax (${num(job.taxRate)}%)</span><span>${money(tax, true)}</span></div>` : ''}
         <div class="inv-row inv-balance"><span>Total Contract Price</span><span>${money(total, true)}</span></div>
       </div>
 
@@ -2028,6 +2057,10 @@ function renderSettings() {
         </div>
       </div>
 
+      ${accountingSettingsHtml()}
+
+      ${securityCardHtml()}
+
       <div class="card">
         <h2>Your data</h2>
         <p class="card-sub">Everything lives in this browser. Export a backup regularly — especially before clearing browser data or switching computers.</p>
@@ -2051,7 +2084,13 @@ function handleSettingChange(input) {
   const val = input.value.trim();
   /* Company name and unit can't be blank; everything else may be cleared. */
   if ((key === 'companyName' || key === 'unit') && !val) return;
-  state.settings[key] = (key === 'tearoffPerLayer' || key === 'depositCap') ? num(val) : val;
+  const numeric = ['tearoffPerLayer', 'depositCap', 'salesTaxRate', 'mileageRate', 'fiscalYearStart'];
+  const next = numeric.includes(key) ? num(val) : val;
+  if (state.settings[key] === next) return;
+  state.settings[key] = next;
+  if (['fiscalYearStart', 'accountingBasis', 'closingDate', 'salesTaxRate', 'mileageRate', 'defaultBankAccountId', 'ein', 'licenseNumber', 'companyName'].includes(key)) {
+    logAudit('settings', key, '', String(next));
+  }
   saveState();
   applyBrand();
 }
@@ -2088,6 +2127,8 @@ async function exportBackup() {
   } catch (err) {
     /* file storage unavailable — still back up everything else */
   }
+  logAudit('export', 'backup', '', `${state.jobs.length} jobs · ${attachments.length} files`);
+  saveState();
   downloadFile('roofing-tracker-backup.json', JSON.stringify({ ...state, attachments }, null, 2), 'application/json');
   toast('Backup downloaded');
 }
@@ -2100,24 +2141,17 @@ function importJson(file) {
       if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.jobs)) {
         throw new Error('bad shape');
       }
+      if (!canWrite()) { toast('Read-only accountant access — a backup can’t be restored'); return; }
       if (!confirm('Restore this backup? It will replace everything currently in the app.')) return;
-      const base = defaultState();
-      state = {
-        version: base.version,
-        settings: { ...base.settings, ...(parsed.settings || {}) },
-        jobs: normalizeJobs(parsed.jobs),
-        estimates: Array.isArray(parsed.estimates) ? parsed.estimates : [],
-        customers: Array.isArray(parsed.customers) ? parsed.customers : [],
-        employees: Array.isArray(parsed.employees) ? parsed.employees : [],
-      };
+      state = hydrateState(parsed);
+      logAudit('restore', 'backup', '', `${file.name} · ${state.jobs.length} jobs`);
       saveState();
       if (Array.isArray(parsed.attachments)) {
         fileTx('readwrite', s => s.clear())
-          .then(() => Promise.all(parsed.attachments.map(a =>
-            fileTx('readwrite', s => s.put({
-              id: a.id, jobId: a.jobId, name: a.name, type: a.type, size: a.size,
-              addedAt: a.addedAt, blob: dataUrlToBlob(a.data),
-            })))))
+          .then(() => Promise.all(parsed.attachments.map(a => sealFileRec({
+            id: a.id, jobId: a.jobId, name: a.name, type: a.type, size: a.size,
+            addedAt: a.addedAt, blob: dataUrlToBlob(a.data),
+          }).then(putFileRec))))
           .catch(() => {});
       }
       applyBrand();

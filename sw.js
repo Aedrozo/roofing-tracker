@@ -1,13 +1,14 @@
 /* Offline cache for the NextGen job tracker (active only when served over http/https). */
 'use strict';
 
-const CACHE = 'ngpr-shell-v3';
+const CACHE = 'ngpr-shell-v4';
 const ASSETS = [
   './',
   './index.html',
   './css/styles.css',
   './js/core.js',
   './js/views.js',
+  './js/accounting.js',
   './js/main.js',
   './assets/logo.png',
   './assets/icon-192.png',

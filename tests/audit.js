@@ -20,6 +20,8 @@ function check(name, ok, detail) {
   const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 960 }, acceptDownloads: true });
   const page = await ctx.newPage();
+  // The fixtures below are dated July 2026; freeze the clock so the suite stays green over time.
+  await page.clock.setFixedTime(new Date('2026-07-20T12:00:00'));
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', e => consoleErrors.push(e.message));
   page.on('dialog', d => d.accept());
@@ -92,7 +94,7 @@ function check(name, ok, detail) {
     page.waitForEvent('download'),
     page.click('#jd-files .file-row [data-action="file-download"]'),
   ]);
-  check('Download attached file keeps original name', dl.suggestedFilename() === 'invoice-4417.pdf');
+  check('Download attached file keeps original name', dl.suggestedFilename() === 'invoice-4417.pdf', dl.suggestedFilename());
 
   await page.selectOption('#jd-status', 'paid');
   await page.fill('#jd-completed', '2026-07-15');
@@ -778,6 +780,282 @@ function check(name, ok, detail) {
     page.click('[data-action="export-json-lite"]'),
   ]);
   check('Backup without files option', liteDl.suggestedFilename() === 'roofing-tracker-backup-nofiles.json');
+
+  // ---------- 29. Accounting: ledger invariants ----------
+  await page.click('.nav-btn[data-view="accounting"]');
+  await page.waitForTimeout(150);
+  const acctHtml = await page.textContent('#view-accounting');
+  check('Accounting view renders overview with tabs', acctHtml.includes('Accounting') && (await page.locator('.acct-tabs button').count()) === 9);
+
+  const ledgerOk = await page.evaluate(() => {
+    const T = buildLedger();
+    return T.length > 0 && T.every(t => Math.abs(t.lines.reduce((s, l) => s + l.dr - l.cr, 0)) < 0.005);
+  });
+  check('Every ledger transaction is balanced (debits = credits)', ledgerOk);
+
+  const bs0 = await page.evaluate(() => reportData('balance', '', '2026-12-31', {}).summary);
+  check('Balance sheet balances (Assets = Liabilities + Equity)', bs0.balanced === true, JSON.stringify(bs0));
+  const tb0 = await page.evaluate(() => reportData('trial', '', '2026-12-31', {}).summary);
+  check('Trial balance: total debits = total credits', tb0.balanced === true);
+
+  const pnl = await page.evaluate(() => ({
+    accrual: reportData('pnl', '2026-01-01', '2026-12-31', { basis: 'accrual' }).summary,
+    cash: reportData('pnl', '2026-01-01', '2026-12-31', { basis: 'cash' }).summary,
+    ni: netIncome(buildLedger(), '2026-01-01', '2026-12-31'),
+  }));
+  check('P&L (accrual) net income matches ledger net income', Math.abs(pnl.accrual.net - pnl.ni) < 0.01, JSON.stringify(pnl));
+  check('P&L cash basis is computed from payments received', pnl.cash.income > 0 && pnl.cash.income !== pnl.accrual.income);
+
+  // Every report runs without throwing and produces columns
+  const reportNames = await page.evaluate(() => REPORTS.map(r => r[0]));
+  const reportFails = [];
+  for (const r of reportNames) {
+    const ok = await page.evaluate(n => { try { const R = reportData(n, '2026-01-01', '2026-12-31', {}); return R.cols.length > 0; } catch (e) { return e.message; } }, r);
+    if (ok !== true) reportFails.push(r + ':' + ok);
+  }
+  check('All 17 reports run (' + reportNames.length + ')', reportNames.length === 17 && reportFails.length === 0, reportFails.join(', '));
+
+  // ---------- 30. Bills, vendors, A/P aging ----------
+  await page.click('.acct-tabs [data-tab="bills"]');
+  await page.click('[data-action="acct-new-bill"]');
+  await page.click('[data-action="acct-save-bill"]'); // empty → rejected
+  check('Bill without vendor/amount is rejected', await page.evaluate(() => document.querySelector('#acct-dialog').open));
+  await page.fill('#bd-vendor', 'ABC Roofing Supply');
+  await page.fill('#bd-date', '2026-07-10');
+  await page.fill('#bd-amount', '1200');
+  await page.fill('#bd-ref', 'INV-5510');
+  await page.fill('#bd-due', '2026-08-09');
+  await page.click('[data-action="acct-save-bill"]');
+  await page.waitForTimeout(100);
+  const billsHtml = await page.textContent('#view-accounting');
+  check('Unpaid bill saved and listed', billsHtml.includes('ABC Roofing Supply') && billsHtml.includes('INV-5510') && billsHtml.includes('Unpaid'));
+  const ap1 = await page.evaluate(() => reportData('ap', '', '2026-07-31', {}).summary.total);
+  check('A/P aging includes the unpaid bill', ap1 >= 1200);
+  check('Vendor auto-created from the bill', await page.evaluate(() => state.vendors.some(v => v.name === 'ABC Roofing Supply')));
+
+  // mark paid
+  await page.click('#view-accounting tr:has-text("ABC Roofing Supply")');
+  await page.check('#bd-paid');
+  await page.fill('#bd-paiddate', '2026-07-12');
+  await page.click('[data-action="acct-save-bill"]');
+  await page.waitForTimeout(100);
+  const ap2 = await page.evaluate(() => reportData('ap', '', '2026-07-31', {}).summary.total);
+  check('Paying the bill removes it from A/P', Math.abs(ap1 - ap2 - 1200) < 0.01, ap1 + ' → ' + ap2);
+  const bsAfterBill = await page.evaluate(() => reportData('balance', '', '2026-12-31', {}).summary.balanced);
+  check('Books still balance after bill + payment', bsAfterBill === true);
+
+  // attach a receipt to the bill
+  await page.click('#view-accounting tr:has-text("ABC Roofing Supply")');
+  await page.setInputFiles('#ac-file-input', [f2]);
+  await page.waitForTimeout(300);
+  check('Receipt attached to a bill', (await page.locator('#ac-files .file-row').count()) === 1);
+  await page.click('[data-action="acct-dlg-close"]');
+
+  // vendor 1099 flag
+  await page.click('.acct-tabs [data-tab="vendors"]');
+  await page.click('#view-accounting tr:has-text("ABC Roofing Supply")');
+  await page.check('#vd-1099');
+  await page.fill('#vd-taxid', '12-3456789');
+  await page.click('[data-action="acct-save-vendor"]');
+  await page.waitForTimeout(100);
+  const f1099 = await page.evaluate(() => reportData('form1099', '2026-01-01', '2026-12-31', {}).rows);
+  check('1099 report flags vendor paid ≥ $600 with masked tax ID and missing W-9',
+    f1099.length === 1 && f1099[0][0] === 'ABC Roofing Supply' && f1099[0][1] === '••••6789' && f1099[0][2] === 'MISSING' && f1099[0][4] === 'REQUIRED', JSON.stringify(f1099));
+
+  // ---------- 31. Journal entries ----------
+  await page.click('.acct-tabs [data-tab="register"]');
+  await page.click('[data-action="acct-new-je"]');
+  await page.fill('#je-date', '2026-07-01');
+  await page.fill('#je-memo', 'Owner contribution');
+  await page.selectOption('#je-lines .je-row:nth-child(1) [data-je="acct"]', 'a1000');
+  await page.fill('#je-lines .je-row:nth-child(1) [data-je="dr"]', '5000');
+  await page.selectOption('#je-lines .je-row:nth-child(2) [data-je="acct"]', 'a3000');
+  await page.fill('#je-lines .je-row:nth-child(2) [data-je="cr"]', '4000');
+  await page.click('[data-action="acct-save-je"]');
+  check('Unbalanced journal entry is rejected', await page.evaluate(() => document.querySelector('#acct-dialog').open && state.journal.length === 0));
+  await page.fill('#je-lines .je-row:nth-child(2) [data-je="cr"]', '5000');
+  await page.waitForTimeout(50);
+  check('Journal dialog shows Balanced ✓ when debits = credits', (await page.textContent('#je-calc')).includes('Balanced'));
+  await page.click('[data-action="acct-save-je"]');
+  await page.waitForTimeout(100);
+  const regHtml = await page.textContent('#view-accounting');
+  check('Balanced journal entry posts to the register', regHtml.includes('Owner contribution') && await page.evaluate(() => state.journal.length === 1));
+  const eqAfter = await page.evaluate(() => accountBalance(buildLedger(), 'a3000', '2026-12-31'));
+  check('Owner’s Equity reflects the journal entry ($5,000)', Math.abs(eqAfter - 5000) < 0.01, String(eqAfter));
+
+  // ---------- 32. Sales tax on a job + invoice ----------
+  await page.click('.nav-btn[data-view="jobs"]');
+  await page.click('#view-jobs tr:has-text("881 Sunset Mesa")');
+  await page.fill('#jd-tax', '7.75');
+  await page.waitForTimeout(50);
+  const calcTax = await page.textContent('#jd-calc');
+  check('Job dialog shows sales tax in the invoice total', calcTax.includes('sales tax'));
+  await page.click('[data-action="jd-invoice"]');
+  await page.waitForTimeout(100);
+  const invTax = await page.textContent('#invoice-overlay');
+  check('Invoice prints Subtotal / Sales tax (7.75%) / Total', invTax.includes('Subtotal') && invTax.includes('Sales tax (7.75%)'));
+  await page.click('[data-action="invoice-close"]');
+  const taxRep = await page.evaluate(() => ({ rows: reportData('salestax', '2026-01-01', '2026-12-31', {}).rows.length, liab: accountBalance(buildLedger(), 'a2300', '2026-12-31'), bal: reportData('balance', '', '2026-12-31', {}).summary.balanced }));
+  check('Sales tax report + Sales Tax Payable liability + books balance', taxRep.rows >= 1 && taxRep.liab > 0 && taxRep.bal === true, JSON.stringify(taxRep));
+  // reset tax so later dashboard checks keep their numbers
+  await page.click('#view-jobs tr:has-text("881 Sunset Mesa")');
+  await page.fill('#jd-tax', '0');
+  await page.click('[data-action="jd-save"]');
+  await page.waitForTimeout(100);
+
+  // ---------- 33. Closing date (period lock) ----------
+  await page.click('.nav-btn[data-view="settings"]');
+  await page.fill('#set-closing', '2026-07-31');
+  await page.waitForTimeout(100);
+  await page.click('.nav-btn[data-view="accounting"]');
+  await page.click('.acct-tabs [data-tab="bills"]');
+  await page.click('#view-accounting tr:has-text("ABC Roofing Supply")');
+  await page.fill('#bd-amount', '9999');
+  await page.click('[data-action="acct-save-bill"]');
+  const lockedBill = await page.evaluate(() => state.bills[0].amount);
+  check('Closing date blocks editing a bill in the closed period', lockedBill === 1200 && await page.evaluate(() => document.querySelector('#acct-dialog').open));
+  await page.click('[data-action="acct-dlg-close"]');
+  await page.click('.nav-btn[data-view="jobs"]');
+  const price881 = await page.evaluate(() => state.jobs.find(j => j.address.startsWith('881')).price);
+  await page.click('#view-jobs tr:has-text("881 Sunset Mesa")');
+  await page.fill('#jd-price', '1');
+  await page.click('[data-action="jd-save"]');
+  check('Closing date blocks editing a job completed in the closed period', await page.evaluate(p => state.jobs.find(j => j.address.startsWith('881')).price === p && document.querySelector('#job-dialog').open, price881));
+  await page.click('[data-action="jd-close"]');
+  await page.click('.nav-btn[data-view="settings"]');
+  await page.fill('#set-closing', '');
+  await page.waitForTimeout(100);
+
+  // ---------- 34. Audit log ----------
+  const audit = await page.evaluate(() => state.audit.map(a => a.action + ':' + a.entity));
+  check('Audit log records job, bill, vendor, journal, and settings changes',
+    audit.includes('create:bill') && audit.includes('update:bill') && audit.includes('update:vendor') && audit.includes('create:journal') && audit.includes('settings:closingDate') && audit.includes('update:job'), audit.slice(-8).join(','));
+  await page.click('.nav-btn[data-view="accounting"]');
+  await page.click('.acct-tabs [data-tab="audit"]');
+  check('Audit Log tab lists entries newest first', (await page.textContent('#view-accounting')).includes('Owner contribution'));
+
+  // ---------- 35. Bank reconciliation with CSV import ----------
+  await page.click('.acct-tabs [data-tab="reconcile"]');
+  const stmtPath = path.join(__dirname, 'statement.csv');
+  fs.writeFileSync(stmtPath, 'Date,Description,Amount\n07/12/2026,"ABC ROOFING SUPPLY",-1200.00\n07/14/2026,"UNKNOWN CHARGE",-42.50\n');
+  await page.setInputFiles('#acct-stmt-file', stmtPath);
+  await page.waitForTimeout(200);
+  const recHtml = await page.textContent('#view-accounting');
+  const clearedKeys = await page.evaluate(() => Object.keys(state.cleared).length);
+  check('Bank CSV import auto-matches the bill payment and flags the unknown line', recHtml.includes('Matched ✓') && recHtml.includes('NOT IN BOOKS') && clearedKeys === 1, 'cleared=' + clearedKeys);
+  await page.fill('[data-field="acct-stmtbal"]', '0');
+  await page.waitForTimeout(600);
+  check('Reconcile shows cleared balance and difference', (await page.textContent('#view-accounting')).includes('Cleared balance'));
+
+  // ---------- 36. Documents center ----------
+  await page.click('.acct-tabs [data-tab="documents"]');
+  await page.waitForTimeout(250);
+  const docsHtml = await page.textContent('#acct-docs');
+  check('Documents center lists job and bill attachments together', docsHtml.includes('invoice-4417.pdf') && docsHtml.includes('receipt-dump.pdf') && docsHtml.includes('ABC Roofing Supply'), docsHtml.replace(/\s+/g, ' ').slice(0, 300));
+
+  // ---------- 37. Exports for the accountant ----------
+  await page.click('.acct-tabs [data-tab="reports"]');
+  await page.selectOption('[data-field="acct-report"]', 'gl');
+  await page.waitForTimeout(100);
+  const [repDl] = await Promise.all([page.waitForEvent('download'), page.click('[data-action="acct-report-csv"]')]);
+  check('Report CSV export', repDl.suggestedFilename().startsWith('NGPR_gl_'));
+
+  const pkgNames = [];
+  const onDl = d => pkgNames.push(d.suggestedFilename());
+  page.on('download', onDl);
+  await page.click('[data-action="acct-package"]');
+  await page.waitForTimeout(17 * 350 + 1500);
+  page.off('download', onDl);
+  check('Accountant package downloads all 17 CSV reports', pkgNames.length === 17 && pkgNames.some(n => n.includes('profit-and-loss-accrual')) && pkgNames.some(n => n.includes('1099-vendors')), pkgNames.length + ' files');
+
+  // ---------- 38. Security: encryption, lock, accountant read-only ----------
+  await page.click('.nav-btn[data-view="settings"]');
+  await page.fill('#sec-pass1', 'owner-pass-1');
+  await page.fill('#sec-pass2', 'owner-pass-2');
+  await page.click('[data-action="sec-enable"]');
+  await page.waitForTimeout(100);
+  check('Mismatched passcodes are rejected', await page.evaluate(() => !localStorage.getItem('ngpr-sec-v1')));
+  await page.fill('#sec-pass1', 'owner-pass-1');
+  await page.fill('#sec-pass2', 'owner-pass-1');
+  await page.click('[data-action="sec-enable"]');
+  await page.waitForTimeout(800);
+  const encState = await page.evaluate(async () => ({
+    raw: localStorage.getItem('ngpr-tracker-v1').slice(0, 9),
+    cfg: !!localStorage.getItem('ngpr-sec-v1'),
+    files: (await rawAllFiles()).map(f => !!f.enc && !f.blob),
+  }));
+  check('Enabling passcode encrypts state and every attached file (AES-GCM)', encState.raw === '{"enc":1,' && encState.cfg && encState.files.length === 2 && encState.files.every(Boolean), JSON.stringify(encState));
+  check('Lock button appears in the sidebar', await page.evaluate(() => !document.querySelector('#lock-btn').hidden));
+
+  // set accountant passcode
+  await page.fill('#sec-acct', 'cpa-readonly-1');
+  await page.click('[data-action="sec-set-acct"]');
+  await page.waitForTimeout(300);
+  check('Accountant passcode saved', await page.evaluate(() => !!JSON.parse(localStorage.getItem('ngpr-sec-v1')).acct));
+
+  // reload → locked
+  await page.reload();
+  await page.waitForTimeout(300);
+  check('App opens locked after reload', await page.evaluate(() => !document.querySelector('#lock-screen').hidden && document.body.classList.contains('locked') && state.jobs.length === 0));
+  await page.fill('#lock-pass', 'wrong-pass');
+  await page.click('#lock-form button[type="submit"]');
+  await page.waitForTimeout(400);
+  check('Wrong passcode is refused', (await page.textContent('#lock-msg')).includes('Wrong passcode'));
+
+  // unlock as accountant
+  await page.fill('#lock-pass', 'cpa-readonly-1');
+  await page.click('#lock-form button[type="submit"]');
+  await page.waitForTimeout(600);
+  const cpaState = await page.evaluate(() => ({ locked: document.body.classList.contains('locked'), ro: document.body.classList.contains('readonly'), jobs: state.jobs.length, badge: !document.querySelector('#role-badge').hidden, role: session.role }));
+  check('Accountant passcode unlocks in read-only mode with data visible', !cpaState.locked && cpaState.ro && cpaState.jobs > 0 && cpaState.badge && cpaState.role === 'accountant', JSON.stringify(cpaState));
+  await page.click('.nav-btn[data-view="jobs"]');
+  check('Read-only role hides “New job” and other write buttons', await page.evaluate(() => getComputedStyle(document.querySelector('#view-jobs [data-action="new-job"]')).display === 'none'));
+  await page.click('#view-jobs tr:has-text("881 Sunset Mesa")');
+  await page.fill('#jd-price', '5');
+  check('Read-only role hides the Save button in the job dialog', await page.evaluate(() => getComputedStyle(document.querySelector('[data-action="jd-save"]')).display === 'none'));
+  await page.evaluate(() => saveJobFromDialog()); // even a forced save is refused
+  await page.waitForTimeout(100);
+  check('Accountant cannot save changes to a job', await page.evaluate(p => state.jobs.find(j => j.address.startsWith('881')).price === p, price881));
+  await page.click('[data-action="jd-invoice"]');
+  await page.waitForTimeout(100);
+  check('Accountant can still view invoices', await page.evaluate(() => !document.querySelector('#invoice-overlay').hidden && !document.querySelector('#job-dialog').open));
+  await page.click('[data-action="invoice-close"]');
+  await page.click('.nav-btn[data-view="accounting"]');
+  const [roDl] = await Promise.all([page.waitForEvent('download'), page.click('.acct-tabs [data-tab="reports"]').then(() => page.click('[data-action="acct-report-csv"]'))]);
+  check('Accountant can export reports', roDl.suggestedFilename().startsWith('NGPR_'));
+
+  // lock and unlock as owner; attachments readable again
+  await page.click('#lock-btn');
+  await page.waitForTimeout(100);
+  check('Lock now clears data from memory', await page.evaluate(() => document.body.classList.contains('locked') && state.jobs.length === 0));
+  await page.fill('#lock-pass', 'owner-pass-1');
+  await page.click('#lock-form button[type="submit"]');
+  await page.waitForTimeout(600);
+  const ownerState = await page.evaluate(async () => ({ ro: document.body.classList.contains('readonly'), role: session.role, jobs: state.jobs.length, blobs: (await allFiles()).every(f => f.blob && f.blob.size > 0) }));
+  check('Owner passcode restores full access and decrypts attachments', !ownerState.ro && ownerState.role === 'owner' && ownerState.jobs > 0 && ownerState.blobs, JSON.stringify(ownerState));
+
+  // auto-lock timer fires
+  await page.click('.nav-btn[data-view="settings"]');
+  await page.fill('#sec-autolock', '1');
+  await page.click('[data-action="sec-autolock-save"]');
+  await page.evaluate(() => { clearTimeout(session.lockTimer); session.lockTimer = setTimeout(() => { lockSession(); showLockScreen(); }, 200); });
+  await page.waitForTimeout(500);
+  check('Idle auto-lock locks the app', await page.evaluate(() => document.body.classList.contains('locked')));
+  await page.fill('#lock-pass', 'owner-pass-1');
+  await page.click('#lock-form button[type="submit"]');
+  await page.waitForTimeout(600);
+
+  // disable → plain again
+  await page.click('.nav-btn[data-view="settings"]');
+  await page.click('[data-action="sec-disable"]');
+  await page.waitForTimeout(800);
+  const plain = await page.evaluate(async () => ({ raw: localStorage.getItem('ngpr-tracker-v1').slice(0, 2), cfg: localStorage.getItem('ngpr-sec-v1'), files: (await rawAllFiles()).every(f => f.blob && !f.enc) }));
+  check('Turning protection off stores data unencrypted again', plain.raw === '{"' && plain.cfg === null && plain.files, JSON.stringify(plain));
+
+  // ---------- 39. Backup round-trip includes accounting data ----------
+  const [fullDl] = await Promise.all([page.waitForEvent('download'), page.click('[data-action="export-json"]')]);
+  const backup = JSON.parse(fs.readFileSync(await fullDl.path(), 'utf8'));
+  check('Backup contains bills, vendors, journal, accounts, audit log, and attachments', backup.bills.length === 1 && backup.vendors.length === 1 && backup.journal.length === 1 && backup.accounts.length > 20 && backup.audit.length > 5 && backup.attachments.length === 2);
 
   // ---------- 28. v2 → v4 migration ----------
   const page2 = await ctx.newPage();

@@ -1009,7 +1009,8 @@ dialog::backdrop { background: rgba(11, 11, 11, 0.45); }
   .brand img { width: auto; height: 52px; max-height: 52px; flex: none; }
   .brand-name { text-align: left; }
 
-  .nav { flex-direction: row; overflow-x: auto; }
+  .nav { flex-direction: row; overflow-x: auto; min-width: 0; max-width: 100%; -webkit-overflow-scrolling: touch; }
+  .sidebar, .main { min-width: 0; }
   .nav-btn { white-space: nowrap; }
   .sidebar-foot { display: none; }
   .main { padding: 20px 16px 56px; }
@@ -1057,3 +1058,104 @@ dialog::backdrop { background: rgba(11, 11, 11, 0.45); }
 .sidebar-foot { color: #767d89; }
 .sidebar-foot .linklike { color: #e5b84b; }
 @media (max-width: 900px) { .sidebar { border-bottom-color: rgba(255, 255, 255, 0.08); } }
+
+/* ---------- Accounting ---------- */
+
+/* The hidden attribute always wins over component display rules. */
+[hidden] { display: none !important; }
+
+.acct-tabs { flex-wrap: wrap; margin: 4px 0 18px; }
+.acct-tabs button { padding: 8px 14px; }
+.acct-tabs button + button { border-left: 0; }
+@media (max-width: 700px) { .acct-tabs button { flex: 1 1 auto; } }
+
+.rep-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 4px 0 12px; }
+.rep-head h2 { margin: 0; }
+.rep-h { margin: 18px 0 6px; font-size: 14px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink-2); }
+table.rep td:first-child { min-width: 220px; }
+tr.rep-section td { font-weight: 700; background: var(--surface-2); }
+tr.rep-total td { font-weight: 700; border-top: 2px solid var(--baseline); }
+tr.rep-total td.num { font-variant-numeric: tabular-nums; }
+
+.expense-row.je-row { grid-template-columns: 1fr 130px 130px 34px; }
+
+.role-badge {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(229, 184, 75, 0.16);
+  color: #e5b84b;
+  font-size: 12px;
+  font-weight: 600;
+}
+.lock-btn { margin-bottom: 10px; color: #f4f5f7; border-color: rgba(255, 255, 255, 0.18); background: transparent; }
+.lock-btn:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* Read-only accountant role: hide every control that would change data. */
+body.readonly .btn.primary,
+body.readonly .btn.danger,
+body.readonly .btn-icon[data-action$="-remove"],
+body.readonly .btn-icon[data-action$="-delete"],
+body.readonly [data-action="file-delete"],
+body.readonly [data-action$="-add"],
+body.readonly [data-action$="-save"],
+body.readonly [data-action="new-job"],
+body.readonly [data-action="new-customer"],
+body.readonly [data-action="new-employee"],
+body.readonly [data-action="scope-new"],
+body.readonly [data-action^="acct-new-"],
+body.readonly [data-action^="acct-import-"],
+body.readonly [data-action="acct-opening"],
+body.readonly [data-action="wipe"],
+body.readonly [data-action="logo-reset"],
+body.readonly label.btn:has(input[type="file"]),
+body.readonly [data-clear] { display: none !important; }
+body.readonly [data-action="invoice-print"],
+body.readonly [data-action="acct-print"],
+body.readonly [data-action="acct-package"],
+body.readonly #lock-screen .btn.primary { display: inline-flex !important; }
+
+/* Lock screen */
+#lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(1200px 600px at 50% -10%, #1c2330 0%, #0f1216 60%);
+}
+body.locked .app { display: none; }
+.lock-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 32px 28px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.lock-card img { width: 84px; height: 84px; object-fit: contain; margin-bottom: 8px; }
+.lock-card h1 { margin: 0 0 6px; font-size: 22px; }
+.lock-card p { margin: 0 0 16px; color: var(--ink-2); font-size: 14px; }
+.lock-card form { display: flex; gap: 8px; margin-bottom: 10px; }
+.lock-card input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+}
+.lock-card input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.lock-msg { min-height: 18px; font-size: 13px; }
+.lock-msg.err { color: var(--critical); font-weight: 600; }
+
+@media print {
+  #lock-screen, #role-badge, #lock-btn { display: none !important; }
+  .acct-tabs, #view-accounting .toolbar, #view-accounting .page-head button { display: none !important; }
+}
