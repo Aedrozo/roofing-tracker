@@ -79,7 +79,7 @@ function check(name, ok, detail) {
   check('Attach two invoices to a job', fileRows === 2 && fileNames.includes('invoice-4417.pdf') && fileNames.includes('receipt-dump.pdf'));
 
   // delete one
-  await page.click('#jd-files .file-row:last-child [data-action="file-delete"]');
+  await page.click('#jd-files .file-row:has-text("receipt-dump.pdf") [data-action="file-delete"]');
   await page.waitForTimeout(200);
   check('Delete an attached file', (await page.locator('#jd-files .file-row').count()) === 1);
 

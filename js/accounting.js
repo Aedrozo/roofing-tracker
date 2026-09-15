@@ -1043,7 +1043,7 @@ async function renderDocuments(a) {
   let files = [];
   try { files = await rawAllFiles(); } catch (err) { box.innerHTML = '<p class="hint">File storage is not available in this browser.</p>'; return; }
   const q = (a.docSearch || '').toLowerCase();
-  const rows = files.map(f => ({ f, owner: ownerLabelForFile(f) })).filter(r => !q || r.f.name.toLowerCase().includes(q) || r.owner.toLowerCase().includes(q)).sort((x, y) => (y.f.addedAt || '').localeCompare(x.f.addedAt || ''));
+  const rows = files.map(f => ({ f, owner: ownerLabelForFile(f) })).filter(r => !q || r.f.name.toLowerCase().includes(q) || r.owner.toLowerCase().includes(q)).sort((x, y) => (y.f.addedAt || '').localeCompare(x.f.addedAt || '') || x.f.name.localeCompare(y.f.name));
   const total = files.reduce((s, f) => s + (f.size || 0), 0);
   box.innerHTML = `
     <div class="toolbar"><input type="search" placeholder="Search documents…" value="${esc(a.docSearch || '')}" data-field="acct-docsearch"><span class="hint">${files.length} file${files.length === 1 ? '' : 's'} · ${fmtSize(total)}${secConfig() ? ' · encrypted at rest 🔒' : ''}</span></div>
@@ -1061,6 +1061,7 @@ async function renderOwnerFiles(ownerKey, containerSel) {
   try { files = await getJobFiles(ownerKey); } catch (err) { box.innerHTML = '<p class="hint">File storage is not available.</p>'; return; }
   if (!$(containerSel)) return;
   if (!files.length) { $(containerSel).innerHTML = '<p class="hint" style="margin:4px 0">No files attached yet.</p>'; return; }
+  files.sort((a, b) => (a.addedAt || '').localeCompare(b.addedAt || '') || a.name.localeCompare(b.name));
   $(containerSel).innerHTML = files.map(f => `
     <div class="file-row">
       ${f.blob && f.type && f.type.startsWith('image/') ? `<img class="file-thumb" src="${URL.createObjectURL(f.blob)}" alt="">` : '<span class="file-icon">📄</span>'}

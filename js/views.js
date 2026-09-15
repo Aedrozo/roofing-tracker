@@ -674,7 +674,7 @@ function renderJobFiles() {
       box.innerHTML = '<p class="hint" style="margin:4px 0">No files attached yet.</p>';
       return;
     }
-    files.sort((a, b) => (a.addedAt || '').localeCompare(b.addedAt || ''));
+    files.sort((a, b) => (a.addedAt || '').localeCompare(b.addedAt || '') || a.name.localeCompare(b.name));
     box.innerHTML = files.map(f => `
       <div class="file-row">
         ${f.blob && f.type && f.type.startsWith('image/') ? `<img class="file-thumb" src="${URL.createObjectURL(f.blob)}" alt="">` : '<span class="file-icon">📄</span>'}
